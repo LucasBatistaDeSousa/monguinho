@@ -1,0 +1,176 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # MongoDB Sharding - 3 Shards
+  # ============================================
+
+  # Shard 1
+  shard1:
+    image: mongo:7.0
+    container_name: shard1
+    ports:
+      - "27017:27017"
+    volumes:
+      - shard1_data:/data/db
+    command: mongod --shardsvr --replSet rs0 --port 27017 --dbpath /data/db
+    networks:
+      - mongo_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Shard 2
+  shard2:
+    image: mongo:7.0
+    container_name: shard2
+    ports:
+      - "27018:27017"
+    volumes:
+      - shard2_data:/data/db
+    command: mongod --shardsvr --replSet rs1 --port 27017 --dbpath /data/db
+    networks:
+      - mongo_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Shard 3
+  shard3:
+    image: mongo:7.0
+    container_name: shard3
+    ports:
+      - "27019:27017"
+    volumes:
+      - shard3_data:/data/db
+    command: mongod --shardsvr --replSet rs2 --port 27017 --dbpath /data/db
+    networks:
+      - mongo_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Config Server
+  config:
+    image: mongo:7.0
+    container_name: config
+    ports:
+      - "27020:27017"
+    volumes:
+      - config_data:/data/db
+    command: mongod --configsvr --replSet configrs --port 27017 --dbpath /data/db
+    networks:
+      - mongo_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Init Replica Sets
+  init-replica-sets:
+    image: node:20-alpine
+    container_name: init-replica-sets
+    working_dir: /app
+    volumes:
+      - ./scripts/init-replica-sets.js:/app/init-replica-sets.js
+    command: |
+      sh -c "npm install mongodb > /dev/null 2>&1 && node init-replica-sets.js"
+    depends_on:
+      shard1:
+        condition: service_healthy
+      shard2:
+        condition: service_healthy
+      shard3:
+        condition: service_healthy
+      config:
+        condition: service_healthy
+    networks:
+      - mongo_network
+    restart: on-failure
+
+  # Mongos Router
+  mongos:
+    image: mongo:7.0
+    container_name: mongos
+    ports:
+      - "27021:27017"
+    command: mongos --configdb configrs/config:27017 --bind_ip 0.0.0.0
+    depends_on:
+      init-replica-sets:
+        condition: service_completed_successfully
+    networks:
+      - mongo_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Init Sharding Service
+  init-sharding:
+    image: mongo:7.0
+    container_name: init-sharding
+    volumes:
+      - ./scripts/init-sharding.mongosh:/app/init-sharding.mongosh
+    command: sh -c "mongosh mongodb://mongos:27017 /app/init-sharding.mongosh"
+    depends_on:
+      mongos:
+        condition: service_healthy
+    networks:
+      - mongo_network
+    restart: on-failure
+
+  # ============================================
+  # NestJS Backend API
+  # ============================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    ports:
+      - "3000:3000"
+    environment:
+      - MONGO_URI=mongodb://mongos:27017/customers
+      - NODE_ENV=production
+    depends_on:
+      init-sharding:
+        condition: service_completed_successfully
+    networks:
+      - mongo_network
+    restart: on-failure
+
+  # ============================================
+  # React Frontend
+  # ============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "3001:3000"
+    environment:
+      - REACT_APP_API_URL=http://backend:3000
+    depends_on:
+      - backend
+    networks:
+      - mongo_network
+    restart: on-failure
+
+volumes:
+  shard1_data:
+  shard2_data:
+  shard3_data:
+  config_data:
+
+networks:
+  mongo_network:
+    driver: bridge

@@ -26,7 +26,7 @@ MongoDB Sharding Cluster
 ## Estrutura do Projeto
 
 ```
-moongoo/
+monguinho/
 ├── frontend/                 # Aplicação React
 │   ├── src/
 │   │   ├── components/      # Componentes React
@@ -61,8 +61,8 @@ moongoo/
 ### 1. Clone o repositório
 
 ```bash
-git clone https://github.com/LucasBatistaDeSousa/moongoo.git
-cd moongoo
+git clone https://github.com/LucasBatistaDeSousa/monguinho.git
+cd monguinho
 ```
 
 ### 2. Inicie os containers
